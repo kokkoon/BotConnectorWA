@@ -24,10 +24,10 @@ namespace Glozic.Function
             _logger = loggerFactory.CreateLogger<SendMessage>();
             s_botService = new BotService()
             {
-                BotName = "Test Bot",
-                BotId = "25b3e891-79b6-44b5-9a3f-84a298b25636",
-                TenantId = "90d4d15c-f7ee-4f77-aaba-e70a2ef0caea",
-                TokenEndPoint = "https://default90d4d15cf7ee4f77aabae70a2ef0ca.ea.environment.api.powerplatform.com/powervirtualagents/botsbyschema/cre16_testBot/directline/token?api-version=2022-03-01-preview"
+                BotName = Environment.GetEnvironmentVariable("BotName"),
+                BotId = Environment.GetEnvironmentVariable("BotId"),
+                TenantId = Environment.GetEnvironmentVariable("TenantId"),
+                TokenEndPoint = Environment.GetEnvironmentVariable("TokenEndPoint")
             };
         }
 

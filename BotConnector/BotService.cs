@@ -23,10 +23,6 @@ namespace Microsoft.PowerVirtualAgents.Samples.BotConnectorApp
 
         public string? TokenEndPoint { get; set; }
 
-        public string? AccountSid { get; set; }
-
-        public string? AuthToken { get; set; }
-
         /// <summary>
         /// Get directline token for connecting bot
         /// </summary>

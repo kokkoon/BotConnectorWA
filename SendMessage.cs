@@ -8,6 +8,8 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RestSharp;
 using System.Text;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Glozic.Function
 {
@@ -22,78 +24,134 @@ namespace Glozic.Function
         public SendMessage(ILoggerFactory loggerFactory)
         {
             _logger = loggerFactory.CreateLogger<SendMessage>();
+            string? BotName = "Test Bot";
+            string? BotId = "29ac0872-9953-4a48-9850-768fff9e952b";
+            string? TenantId = "0c946563-0817-4cf3-89a9-b1e3cf7e556c";
+            string? TokenEndPoint = "https://16af809d0d19e15ca83623478e3472.a5.environment.api.powerplatform.com/powervirtualagents/botsbyschema/cr473_kkWhatsAppTesting/directline/token?api-version=2022-03-01-preview";
+            _logger.LogInformation("BotName, BotId: " + BotName + ", " + BotId);
             s_botService = new BotService()
             {
-                BotName = Environment.GetEnvironmentVariable("BotName"),
-                BotId = Environment.GetEnvironmentVariable("BotId"),
-                TenantId = Environment.GetEnvironmentVariable("TenantId"),
-                TokenEndPoint = Environment.GetEnvironmentVariable("TokenEndPoint")
+                BotName = BotName,
+                BotId = BotId,
+                TenantId = TenantId,
+                TokenEndPoint = TokenEndPoint
             };
         }
 
         [Function("SendMessage")]
-        public async Task<HttpResponseData> Run([HttpTrigger(AuthorizationLevel.Anonymous, "post")] 
+        public async Task<HttpResponseData> Run([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] 
                 HttpRequestData req)
         {
-            var bodyStream = await new StreamReader(req.Body).ReadToEndAsync();
-            _logger.LogInformation("body: " + bodyStream);
-            dynamic jsonObj = JObject.Parse(bodyStream);
-            Console.WriteLine("jsonObj: " + jsonObj);
-            var response = req.CreateResponse(HttpStatusCode.OK);
-            response.Headers.Add("Content-Type", "text/plain; charset=utf-8");
-            if (s_botService is not null && jsonObj.entry is not null && jsonObj.entry[0] is not null && jsonObj.entry[0].changes[0].value.messages is not null) {
-                var token = await s_botService.GetTokenAsync();
-            
-                string from = Convert.ToString(jsonObj.entry[0].changes[0].value.messages[0].from)?? "";
-                string body = Convert.ToString(jsonObj.entry[0].changes[0].value.messages[0].text.body)?? "";
-                string to = Convert.ToString(jsonObj.entry[0].changes[0].value.metadata.display_phone_number)?? "";
-                if (!s_tokens.ContainsKey(from)) {
-                    s_tokens.Add(from, token);
+            _logger.LogInformation("C# HTTP trigger function processed a request on .NET7.0 Isolated.");
+
+            try
+            {
+                var challenge = System.Web.HttpUtility.ParseQueryString(req.Url.Query).Get("hub.challenge");
+                _logger.LogInformation("challenge: " + challenge);
+                var bodyStream = await new StreamReader(req.Body).ReadToEndAsync();
+                _logger.LogInformation("body: " + bodyStream);
+                dynamic jsonObj = (bodyStream != "")? JObject.Parse(bodyStream): new JObject();
+                Console.WriteLine("jsonObj: " + jsonObj);
+                if (s_botService is not null && jsonObj.entry is not null && jsonObj.entry[0] is not null && jsonObj.entry[0].changes[0].value.messages is not null) {
+                    var token = await s_botService.GetTokenAsync();
+                
+                    string from = Convert.ToString(jsonObj.entry[0].changes[0].value.messages[0].from)?? "";
+                    string body = Convert.ToString(jsonObj.entry[0].changes[0].value.messages[0].text.body)?? "";
+                    string to = Convert.ToString(jsonObj.entry[0].changes[0].value.metadata.display_phone_number)?? "";
+                    if (!s_tokens.ContainsKey(from)) {
+                        s_tokens.Add(from, token);
+                    }
+
+                    _logger.LogInformation($"s_tokens: {s_tokens[from]}");
+                    _logger.LogInformation($"From,Body,To : {from} , {body} , {to}");
+                    string myToken = s_tokens[from];
+                    dynamic responseObj = await StartConversation(body, myToken);
+                    Console.WriteLine("responseObj.Message: " + responseObj.Message);
+                    Console.WriteLine("responseObj.Actions: " + responseObj.Actions);
+
+                    var url = "https://graph.facebook.com/v17.0/174350675760672/messages";
+                    var client = new RestClient(url);
+                    var request = new RestRequest(url, Method.Post);
+                    request.AddHeader("Content-Type", "application/json");
+                    request.AddHeader("Authorization", "Bearer EAAT3N7NXVJoBOyjo3E2EZCmCGZBP55vCGoUTl5iC8jKGJ6abtfI06pOCLZA2MxLZAR5aYQPvKZAb1ed1YlGvpoZBpbELgy25isdQ0gdJZATjOPMZAlNPcWPQ9cspnZAJxS77V9ygHvSCY7ZBtYXhmklHGj9yXQK7h1Ju10M4uSm1H7w5M7eVCWq0YfIEgkngHP6G5y");
+                    string payload = "";
+                    if (responseObj.MediaUrl != "") {
+                        payload = $@"{{
+                            ""messaging_product"": ""whatsapp"",
+                            ""to"": ""{from}"",
+                            ""type"": ""{responseObj.MediaType}"",
+                            ""{responseObj.MediaType}"": {{
+                                ""link"": ""{responseObj.MediaUrl}""
+                            }},
+                            ""text"": {{
+                                ""body"": ""{responseObj.Message}""
+                            }}
+                        }}";
+                    } else if (responseObj.Actions != "") {
+                        string resActions = responseObj.Actions;
+                        string[] actions = resActions.Split("|");
+                        StringBuilder builder = new StringBuilder(responseObj.Message);
+                        builder.Replace("\"", "\'");
+                        payload = $@"{{
+                            ""messaging_product"": ""whatsapp"",
+                            ""to"": ""{from}"",
+                            ""type"": ""interactive"",
+                            ""interactive"": {{
+                                ""type"": ""button"",
+                                ""body"": {{
+                                    ""text"": ""{builder.ToString()}""
+                                }},
+                                ""action"": {{
+                                    ""buttons"": [";
+                        foreach (var (action, i)  in actions.Select((v,i) => (v, i)))
+                        {
+                            payload += $@"
+                                        {{
+                                            ""type"": ""reply"",
+                                            ""reply"": {{
+                                                    ""id"": ""UNIQUE_BUTTON_ID_{i}"",
+                                                    ""title"": ""{action.Substring(0,Math.Min(action.Length, 20)).Trim()}""
+                                                }}
+                                        }},";
+                        }
+                        payload = payload.Remove(payload.Length - 1, 1);
+                        payload += $@"
+                                    ]
+                                }}
+                            }}
+                        }}";
+                    } else {
+                        StringBuilder builder = new StringBuilder(responseObj.Message);
+                        builder.Replace("\"", "\'");
+                        payload = $@"{{
+                            ""messaging_product"": ""whatsapp"",
+                            ""to"": ""{from}"",
+                            ""type"": ""text"",
+                            ""text"": {{
+                                ""body"": ""{builder.ToString()}""
+                            }}
+                        }}";
+                    }
+                    Console.WriteLine("payload: " + payload);
+                    request.AddJsonBody(payload);
+                    RestResponse res = await client.ExecuteAsync(request);
+                    Console.WriteLine("res.Content: " + res.Content);
                 }
 
-                _logger.LogInformation($"s_tokens: {s_tokens[from]}");
-                _logger.LogInformation($"From,Body,To : {from} , {body} , {to}");
-                _logger.LogInformation("C# HTTP trigger function processed a request on .NET7.0 Isolated.");
-                string myToken = s_tokens[from];
-                dynamic responseObj = await StartConversation(body, myToken);
-                Console.WriteLine("responseObj.Message: " + responseObj.Message);
+                
+                var response = req.CreateResponse(HttpStatusCode.OK);
+                response.Headers.Add("Content-Type", "text/plain; charset=utf-8");
+                if (req.Method == "GET" && challenge is not null) response.WriteString(challenge);
+                return response;
+            } 
+            catch (Exception ex)
+            {
+                _logger.LogInformation("Exception ... " + ex);
 
-                var url = "https://graph.facebook.com/v17.0/108716175377344/messages";
-                var client = new RestClient(url);
-                var request = new RestRequest(url, Method.Post);
-                request.AddHeader("content-type", "application/json");
-                request.AddHeader("Authorization", "Bearer EAAL8CAAFGXwBO2xGeLD8wxgJ1gZBkeaSypXnb42qBgmfVKKE2hmmywLwWk6vzSocfZCP0omQSatOktsr4wQ2oUaQOc1J0DPEMmwzyzfN3ZCfQvEEb6s1G12aQAZBRbEWi2KAb15iS6mWMscfhuVOJSrLybjeZCoXboyvnncahbmiZCNsD9jQZAH4noHUuyoEKiJ");
-                string payload = "";
-                if (responseObj.MediaUrl != "") {
-                    payload = $@"{{
-                        ""messaging_product"": ""whatsapp"",
-                        ""to"": ""{from}"",
-                        ""type"": ""{responseObj.MediaType}"",
-                        ""{responseObj.MediaType}"": {{
-                            ""link"": ""{responseObj.MediaUrl}""
-                        }},
-                        ""text"": {{
-                            ""body"": ""{responseObj.Message}""
-                        }}
-                    }}";
-                } else {
-                    StringBuilder builder = new StringBuilder(responseObj.Message);
-                    builder.Replace("\"", "\'");
-                    payload = $@"{{
-                        ""messaging_product"": ""whatsapp"",
-                        ""to"": ""{from}"",
-                        ""type"": ""text"",
-                        ""text"": {{
-                            ""body"": ""{builder.ToString()}""
-                        }}
-                    }}";
-                }
-                Console.WriteLine("payload: " + payload);
-                request.AddJsonBody(payload);
-                RestResponse res = await client.ExecuteAsync(request);
-                Console.WriteLine("res.Content: " + res.Content);
+                var response = req.CreateResponse(HttpStatusCode.BadRequest);
+                response.Headers.Add("Content-Type", "text/plain; charset=utf-8");
+                return response;
             }
-            return response;
         }
 
         private async Task<ResModel> StartConversation(string inputMsg, string token = "")
@@ -146,10 +204,11 @@ namespace Glozic.Function
                 // responseActivity is standard Microsoft.Bot.Connector.DirectLine.Activity
                 // See https://github.com/Microsoft/botframework-sdk/blob/master/specs/botframework-activity/botframework-activity.md for reference
                 // Showing examples of Text & SuggestedActions in response payload
-                Console.WriteLine(responseActivity.Text);
+                Console.WriteLine("responseActivity.Text: " + responseActivity.Text);
                 if (!string.IsNullOrEmpty(responseActivity.Text))
                 {
-                    responseStr = responseStr + string.Join(Environment.NewLine, responseActivity.Text);
+                    //responseStr = responseStr + string.Join(Environment.NewLine, responseActivity.Text);
+                    responseStr = responseActivity.Text;
                 }
 
                 if (responseActivity.Attachments != null)
@@ -158,9 +217,9 @@ namespace Glozic.Function
                     {
                         Console.WriteLine("attachment.ContentType: " + attachment.ContentType);
                         var jsonStr = JsonConvert.SerializeObject(attachment.Content, Formatting.None);
-                        Console.WriteLine(jsonStr);
+                        Console.WriteLine("jsonStr: " + jsonStr);
                         dynamic jsonObj = JObject.Parse(jsonStr);
-                        Console.WriteLine(jsonObj);
+                        Console.WriteLine("jsonObj: " + jsonObj);
                         switch (attachment.ContentType)
                         {
                             case "application/vnd.microsoft.card.hero":
@@ -184,10 +243,11 @@ namespace Glozic.Function
 
                 if (responseActivity.SuggestedActions != null && responseActivity.SuggestedActions.Actions != null)
                 {
-                    responseAct = responseActivity.SuggestedActions.Actions[0].Title;
-                    Console.WriteLine("Actions: " + responseAct);
-                    var options = responseActivity.SuggestedActions?.Actions?.Select(a => a.Title).ToList()?? new List<string>(0);
-                    responseStr = responseStr + $"\t{string.Join(" | ", options)}";
+                    //responseAct = responseActivity.SuggestedActions.Actions[0].Title;
+                    //Console.WriteLine("Actions: " + responseAct);
+                    var options = responseActivity.SuggestedActions?.Actions?.Select(a => a.Title.Trim()).ToList()?? new List<string>(0);
+                    //responseStr = responseStr + $"\t{string.Join(" | ", options)}";
+                    responseAct = $"\t{string.Join("|", options)}";
                 }
             });
 

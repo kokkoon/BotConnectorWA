@@ -24,10 +24,10 @@ namespace Glozic.Function
         public SendMessage(ILoggerFactory loggerFactory)
         {
             _logger = loggerFactory.CreateLogger<SendMessage>();
-            string? BotName = "Test Bot";
-            string? BotId = "29ac0872-9953-4a48-9850-768fff9e952b";
-            string? TenantId = "0c946563-0817-4cf3-89a9-b1e3cf7e556c";
-            string? TokenEndPoint = "https://16af809d0d19e15ca83623478e3472.a5.environment.api.powerplatform.com/powervirtualagents/botsbyschema/cr473_kkWhatsAppTesting/directline/token?api-version=2022-03-01-preview";
+            string? BotName = Environment.GetEnvironmentVariable("BotName");
+            string? BotId = Environment.GetEnvironmentVariable("BotId");
+            string? TenantId = Environment.GetEnvironmentVariable("TenantId");
+            string? TokenEndPoint = Environment.GetEnvironmentVariable("TokenEndPoint");
             _logger.LogInformation("BotName, BotId: " + BotName + ", " + BotId);
             s_botService = new BotService()
             {
